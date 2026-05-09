@@ -4,6 +4,7 @@ import random
 import string
 import os
 import requests
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 # --- الإعدادات ---
@@ -11,7 +12,13 @@ API_TOKEN = os.getenv('BOT_TOKEN')
 bot = telebot.TeleBot(API_TOKEN)
 CHARS = string.ascii_lowercase + string.digits
 
-# --- دالة الفحص الصارم ---
+# قائمة متصفحات وهمية لتمويه المنصات
+USER_AGENTS = [
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
+]
+
 def check_availability(platform, username):
     urls = {
         "INSTA": f"https://www.instagram.com/{username}/",
@@ -21,48 +28,38 @@ def check_availability(platform, username):
         "SONY": f"https://my.playstation.com/profile/{username}"
     }
     
-    # محاكاة متصفح آيفون حقيقي لتجنب الحظر قدر الإمكان
-    headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9"
-    }
+    headers = {"User-Agent": random.choice(USER_AGENTS)}
     
     try:
-        # زيادة الـ Timeout لضمان استلام كامل الصفحة
-        response = requests.get(urls[platform], headers=headers, timeout=10, allow_redirects=True)
+        # إضافة وقت انتظار عشوائي بسيط (0.5 إلى 1.5 ثانية) لتجنب كشف البوت
+        time.sleep(random.uniform(0.5, 1.5))
+        
+        response = requests.get(urls[platform], headers=headers, timeout=8, allow_redirects=True)
         content = response.text.lower()
-        status = response.status_code
-
-        # --- فحص سناب شات الصارم ---
+        
+        # --- فحص سناب شات (الأكثر دقة) ---
         if platform == "SNAP":
-            # لو الصفحة تحتوي على كود "Add" أو "Snapcode" فاليوزر مأخوذ 100%
-            if "snapcode" in content or "add me" in content or "bitmoji" in content:
+            # إذا الصفحة فيها "bitmoji" أو "snapcode" أو "displayname" يعني مأخوذ 100%
+            if any(word in content for word in ["bitmoji", "snapcode", "og:title", "public profile"]):
                 return None
-            # لو الصفحة أعطت 404 فعلي أو خلت من عناصر البروفايل
-            if status == 404 or "not found" in content:
-                return f"✅ `{username}`"
-        
-        # --- فحص إنستقرام الصارم ---
-        elif platform == "INSTA":
-            if "sorry, this page isn't available" in content or status == 404:
-                return f"✅ `{username}`"
-        
-        # --- فحص سوني الصارم ---
-        elif platform == "SONY":
-            if status == 404 or "error" in response.url.lower():
-                return f"✅ `{username}`"
+            if response.status_code == 404 or "not found" in content:
+                return f"✅ SNAP: `{username}`"
 
-        # --- فحص X و تيك توك ---
-        elif platform in ["X", "TIKTOK"]:
-            if status == 404:
-                return f"✅ `{username}`"
+        # --- فحص إنستقرام ---
+        elif platform == "INSTA":
+            if "isn't available" in content or response.status_code == 404:
+                return f"✅ INSTA: `{username}`"
+
+        # --- فحص سوني ---
+        elif platform == "SONY":
+            if response.status_code == 404 or "error" in response.url.lower():
+                return f"✅ SONY: `{username}`"
 
         return None
     except:
         return None
 
-# --- بقية الكود (التوليد والقوائم) ---
+# --- نظام التوليد والقوائم ---
 def generate_username(length):
     return ''.join(random.choices(CHARS, k=int(length)))
 
@@ -80,33 +77,34 @@ def main_markup():
 
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
-    bot.send_message(message.chat.id, "🛰 **بوت الصيد الصارم | طلال**\n\nتم تحديث الفحص لمنع النتائج الوهمية ✅.", reply_markup=main_markup(), parse_mode="Markdown")
+    bot.send_message(message.chat.id, "🛰 **بوت الصيد الذكي | طلال**\n\nيتم الآن عرض المتاح فقط مع حماية من الحظر.", reply_markup=main_markup(), parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('p_'))
 def select_filter(call):
     platform = call.data.split('_')[1]
     markup = types.InlineKeyboardMarkup(row_width=1)
     for l in ["3", "4", "5"]:
-        markup.add(types.InlineKeyboardButton(f"تخمين عشوائي ({l}) أحرف", callback_data=f"g_{platform}_{l}"))
+        markup.add(types.InlineKeyboardButton(f"تخمين ({l}) أحرف", callback_data=f"g_{platform}_{l}"))
     markup.add(types.InlineKeyboardButton("⬅️ عودة", callback_data="back"))
     bot.edit_message_text(f"🎯 منصة: **{platform}**", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('g_'))
 def execute_hunt(call):
     _, platform, length = call.data.split('_')
-    bot.answer_callback_query(call.id, "🔎 جاري الفحص الصارم...")
+    bot.answer_callback_query(call.id, "🔎 جاري الفحص (تم تفعيل نظام منع الحظر)...")
     
     def worker(_):
         user = generate_username(length)
         return check_availability(platform, user)
 
-    with ThreadPoolExecutor(max_workers=5) as executor: # تقليل السرعة قليلاً لزيادة الدقة وتجنب الحظر
+    # تقليل عدد العمال (Workers) لضمان الدقة وعدم الحظر السريع
+    with ThreadPoolExecutor(max_workers=3) as executor:
         all_results = [res for res in executor.map(worker, range(10)) if res]
     
     if all_results:
-        msg = f"🛰 **يوزرات متاح فعلياً لـ {platform}:**\n\n" + "\n".join(all_results)
+        msg = f"🛰 **يوزرات متاحة لـ {platform}:**\n\n" + "\n".join(all_results)
     else:
-        msg = f"🛰 **نتائج {platform}:**\n\nلم نجد متاحاً حقيقياً في هذه الدفعة. جرب مرة أخرى 🔄"
+        msg = f"🛰 **نتائج {platform}:**\n\nلم نجد متاحاً مؤكداً في هذه الدفعة. جرب مرة أخرى 🔄"
     
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("🔄 صيد جديد", callback_data=call.data))
