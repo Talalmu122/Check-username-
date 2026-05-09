@@ -7,12 +7,13 @@ import requests
 from concurrent.futures import ThreadPoolExecutor
 
 # --- الإعدادات ---
+# تأكد من إضافة BOT_TOKEN في Settings -> Secrets في GitHub
 API_TOKEN = os.getenv('BOT_TOKEN')
 bot = telebot.TeleBot(API_TOKEN)
 
 CHARS = string.ascii_lowercase + string.digits
 
-# --- دالة فحص التوفر المسرّعة ---
+# --- دالة فحص التوفر ---
 def check_availability(platform, username):
     urls = {
         "INSTA": f"https://www.instagram.com/{username}/",
@@ -23,8 +24,8 @@ def check_availability(platform, username):
     }
     
     try:
-        # تقليل الـ timeout لـ 2.5 ثانية لزيادة السرعة
-        response = requests.get(urls[platform], timeout=2.5)
+        # فحص سريع بدون بروكسي للاستفادة من سرعة GitHub
+        response = requests.get(urls[platform], timeout=2.0)
         if response.status_code == 404:
             return "✅ متاح"
         else:
@@ -32,20 +33,18 @@ def check_availability(platform, username):
     except:
         return "⚠️ فحص يدوي"
 
-# --- دالة توليد اليوزرات ---
+# --- دالة توليد اليوزرات العشوائية (بدون تربل) ---
 def generate_username(filter_type):
-    if filter_type == "3": return ''.join(random.choices(CHARS, k=3))
-    elif filter_type == "3s":
-        c1 = random.choice(string.ascii_lowercase)
-        c2 = random.choice(CHARS)
-        return c1 + c1 + c2
-    elif filter_type == "4": return ''.join(random.choices(CHARS, k=4))
-    elif filter_type == "4s":
-        c1 = random.choice(string.ascii_lowercase)
-        c2 = random.choice(CHARS)
-        return c1 + c1 + c1 + c2
-    elif filter_type == "5": return ''.join(random.choices(CHARS, k=5))
-    return None
+    # تم توحيد المنطق ليكون عشوائي تماماً حسب الطول المطلوب
+    length = 4 # الطول الافتراضي
+    if filter_type in ["3", "3s"]:
+        length = 3
+    elif filter_type in ["4", "4s"]:
+        length = 4
+    elif filter_type == "5":
+        length = 5
+        
+    return ''.join(random.choices(CHARS, k=length))
 
 # --- لوحة التحكم ---
 def main_markup():
@@ -62,40 +61,49 @@ def main_markup():
 
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
-    bot.send_message(message.chat.id, "🚀 **بوت الصيد السريع (Turbo Mode)**\nتم تفعيل نظام المهام المتعددة.", reply_markup=main_markup(), parse_mode="Markdown")
+    bot.send_message(message.chat.id, "🚀 **بوت الصيد العشوائي السريع**\n\nتم تحديث نظام التوليد ليكون عشوائياً بالكامل بدون تكرار ممل.", reply_markup=main_markup(), parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('p_'))
 def select_filter(call):
     platform = call.data.split('_')[1]
     markup = types.InlineKeyboardMarkup(row_width=2)
-    for f in [("ثلاثي","3"), ("شبه ثلاثي","3s"), ("رباعي","4"), ("شبه رباعي","4s"), ("خماسي","5")]:
-        markup.add(types.InlineKeyboardButton(f[0], callback_data=f"g_{platform}_{f[1]}"))
-    bot.edit_message_text(f"🎯 منصة: **{platform}** | اختر الفلتر:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+    filters = [
+        ("ثلاثي عشوائي", "3"),
+        ("رباعي عشوائي", "4"),
+        ("خماسي عشوائي", "5")
+    ]
+    for name, key in filters:
+        markup.add(types.InlineKeyboardButton(name, callback_data=f"g_{platform}_{key}"))
+    
+    markup.add(types.InlineKeyboardButton("⬅️ عودة", callback_data="back"))
+    bot.edit_message_text(f"🎯 منصة الفحص: **{platform}**", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
-# --- تنفيذ التخمين بنظام التوازي (Threading) ---
+# --- تنفيذ التخمين بنظام التوازي السريع ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith('g_'))
 def execute_hunt(call):
     _, platform, f_type = call.data.split('_')
-    bot.answer_callback_query(call.id, "⚡ جاري الصيد السريع...")
+    bot.answer_callback_query(call.id, "⚡ جاري الصيد...")
     
     def worker(_):
         user = generate_username(f_type)
         status = check_availability(platform, user)
         return f"`{user}` -> {status}"
 
-    # تنفيذ 10 عمليات فحص في وقت واحد
+    # فحص 10 يوزرات في وقت واحد لزيادة السرعة
     with ThreadPoolExecutor(max_workers=10) as executor:
         results = list(executor.map(worker, range(10)))
     
     msg = f"🛰 **نتائج الصيد لـ {platform}:**\n\n" + "\n".join(results)
+    
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("🔄 صيد مجموعة جديدة", callback_data=call.data))
-    markup.add(types.InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="back"))
+    markup.add(types.InlineKeyboardButton("🏠 عودة", callback_data="back"))
+    
     bot.edit_message_text(msg, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data == "back")
 def back(call):
-    bot.edit_message_text("🎯 اختر المنصة:", call.message.chat.id, call.message.message_id, reply_markup=main_markup())
+    bot.edit_message_text("🎯 اختر المنصة لبدء التخمين:", call.message.chat.id, call.message.message_id, reply_markup=main_markup())
 
 if __name__ == "__main__":
     bot.infinity_polling()
