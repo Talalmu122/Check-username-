@@ -9,66 +9,78 @@ from concurrent.futures import ThreadPoolExecutor
 # --- الإعدادات ---
 API_TOKEN = os.getenv('BOT_TOKEN')
 bot = telebot.TeleBot(API_TOKEN)
-
 CHARS = string.ascii_lowercase + string.digits
 
-# --- دالة الفحص الذكي ---
+# --- دالة الفحص الصارم ---
 def check_availability(platform, username):
     urls = {
         "INSTA": f"https://www.instagram.com/{username}/",
         "TIKTOK": f"https://www.tiktok.com/@{username}",
         "X": f"https://twitter.com/{username}",
         "SNAP": f"https://www.snapchat.com/add/{username}",
-        "SONY": f"https://my.playstation.com/profile/{username}",
-        "DISCORD": f"https://discord.com/api/v9/users/{username}"
+        "SONY": f"https://my.playstation.com/profile/{username}"
     }
     
+    # محاكاة متصفح آيفون حقيقي لتجنب الحظر قدر الإمكان
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9"
     }
     
     try:
-        response = requests.get(urls[platform], headers=headers, timeout=4.0, allow_redirects=True)
+        # زيادة الـ Timeout لضمان استلام كامل الصفحة
+        response = requests.get(urls[platform], headers=headers, timeout=10, allow_redirects=True)
         content = response.text.lower()
         status = response.status_code
 
-        # شروط المتاح لكل منصة
-        is_available = False
-        if platform == "SONY":
-            if status == 404 or "login" in response.url.lower(): is_available = True
-        elif platform == "INSTA" and (status == 404 or "isn't available" in content): is_available = True
-        elif platform == "TIKTOK" and (status == 404 or "couldn't find" in content): is_available = True
-        elif platform == "X" and (status == 404 or "doesn’t exist" in content): is_available = True
-        elif platform == "SNAP" and (status == 404 or "not found" in content): is_available = True
-        elif platform == "DISCORD" and status == 404: is_available = True
+        # --- فحص سناب شات الصارم ---
+        if platform == "SNAP":
+            # لو الصفحة تحتوي على كود "Add" أو "Snapcode" فاليوزر مأخوذ 100%
+            if "snapcode" in content or "add me" in content or "bitmoji" in content:
+                return None
+            # لو الصفحة أعطت 404 فعلي أو خلت من عناصر البروفايل
+            if status == 404 or "not found" in content:
+                return f"✅ `{username}`"
+        
+        # --- فحص إنستقرام الصارم ---
+        elif platform == "INSTA":
+            if "sorry, this page isn't available" in content or status == 404:
+                return f"✅ `{username}`"
+        
+        # --- فحص سوني الصارم ---
+        elif platform == "SONY":
+            if status == 404 or "error" in response.url.lower():
+                return f"✅ `{username}`"
 
-        if is_available:
-            return f"✅ `{username}`"
-        return None # العودة بـ None إذا كان مأخوذاً
+        # --- فحص X و تيك توك ---
+        elif platform in ["X", "TIKTOK"]:
+            if status == 404:
+                return f"✅ `{username}`"
+
+        return None
     except:
         return None
 
-# --- دالة التوليد العشوائي ---
+# --- بقية الكود (التوليد والقوائم) ---
 def generate_username(length):
     return ''.join(random.choices(CHARS, k=int(length)))
 
-# --- القائمة الرئيسية ---
 def main_markup():
     markup = types.InlineKeyboardMarkup(row_width=2)
     btns = [
-        types.InlineKeyboardButton("Instagram", callback_data="p_INSTA"),
-        types.InlineKeyboardButton("TikTok", callback_data="p_TIKTOK"),
         types.InlineKeyboardButton("Snapchat", callback_data="p_SNAP"),
-        types.InlineKeyboardButton("X (Twitter)", callback_data="p_X"),
+        types.InlineKeyboardButton("Instagram", callback_data="p_INSTA"),
         types.InlineKeyboardButton("PlayStation 🎮", callback_data="p_SONY"),
-        types.InlineKeyboardButton("Discord", callback_data="p_DISCORD")
+        types.InlineKeyboardButton("TikTok", callback_data="p_TIKTOK"),
+        types.InlineKeyboardButton("X (Twitter)", callback_data="p_X")
     ]
     markup.add(*btns)
     return markup
 
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
-    bot.send_message(message.chat.id, "🛰 **بوت الصيد الذكي (المتاح فقط)**\n\nسيتم عرض اليوزرات المتاحة ✅ فقط لتسريع عملية القنص.", reply_markup=main_markup(), parse_mode="Markdown")
+    bot.send_message(message.chat.id, "🛰 **بوت الصيد الصارم | طلال**\n\nتم تحديث الفحص لمنع النتائج الوهمية ✅.", reply_markup=main_markup(), parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('p_'))
 def select_filter(call):
@@ -77,33 +89,28 @@ def select_filter(call):
     for l in ["3", "4", "5"]:
         markup.add(types.InlineKeyboardButton(f"تخمين عشوائي ({l}) أحرف", callback_data=f"g_{platform}_{l}"))
     markup.add(types.InlineKeyboardButton("⬅️ عودة", callback_data="back"))
-    bot.edit_message_text(f"🎯 منصة: **{platform}**\nاختر الطول:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+    bot.edit_message_text(f"🎯 منصة: **{platform}**", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('g_'))
 def execute_hunt(call):
     _, platform, length = call.data.split('_')
-    bot.answer_callback_query(call.id, "🔎 جاري البحث عن متاح...")
+    bot.answer_callback_query(call.id, "🔎 جاري الفحص الصارم...")
     
     def worker(_):
         user = generate_username(length)
         return check_availability(platform, user)
 
-    # فحص 15 يوزر في كل ضغطة لزيادة فرص إيجاد متاح
-    with ThreadPoolExecutor(max_workers=15) as executor:
-        all_results = list(executor.map(worker, range(15)))
+    with ThreadPoolExecutor(max_workers=5) as executor: # تقليل السرعة قليلاً لزيادة الدقة وتجنب الحظر
+        all_results = [res for res in executor.map(worker, range(10)) if res]
     
-    # تصفية النتائج لإبقاء المتاح فقط (حذف الـ None)
-    available_only = [res for res in all_results if res is not None]
-    
-    if available_only:
-        msg = f"🛰 **يوزرات متاحة لـ {platform}:**\n\n" + "\n".join(available_only)
+    if all_results:
+        msg = f"🛰 **يوزرات متاح فعلياً لـ {platform}:**\n\n" + "\n".join(all_results)
     else:
-        msg = f"🛰 **نتائج {platform}:**\n\nللأسف، لم يتم العثور على متاح في هذه الدفعة (15 محاولة). جرب مرة أخرى 🔄"
+        msg = f"🛰 **نتائج {platform}:**\n\nلم نجد متاحاً حقيقياً في هذه الدفعة. جرب مرة أخرى 🔄"
     
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("🔄 صيد جديد", callback_data=call.data))
-    markup.add(types.InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="back"))
-    
+    markup.add(types.InlineKeyboardButton("🏠 القائمة", callback_data="back"))
     bot.edit_message_text(msg, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data == "back")
