@@ -4,124 +4,84 @@ import random
 import string
 import os
 import requests
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 # --- الإعدادات ---
 API_TOKEN = os.getenv('BOT_TOKEN')
+# استخرج الـ SessionID من متصفحك بعد تسجيل الدخول لحسابك الجديد
+INSTA_SESSION_ID = os.getenv('INSTA_SESSION') 
+
 bot = telebot.TeleBot(API_TOKEN)
 CHARS = string.ascii_lowercase + string.digits
 
-def check_availability(platform, username):
-    # تم تحديث الروابط لمنطق أكثر دقة
-    urls = {
-        "INSTA": f"https://www.instagram.com/{username}/",
-        "TIKTOK": f"https://www.tiktok.com/@{username}",
-        "X": f"https://twitter.com/{username}",
-        "SNAP": f"https://www.snapchat.com/add/{username}",
-        "SONY": f"https://psnprofiles.com/{username}" # استخدام مرجع أدق لسوني
-    }
-    
+def check_insta_linked(username):
+    """فحص اليوزر من داخل الحساب المربوط"""
+    # رابط داخلي للفحص السريع
+    url = f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9"
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)",
+        "X-IG-App-ID": "936619743392459", # ثابت لنسخة الويب
+        "Cookie": f"sessionid={INSTA_SESSION_ID}"
     }
-    
     try:
-        response = requests.get(urls[platform], headers=headers, timeout=10, allow_redirects=True)
-        content = response.text
-        status = response.status_code
-
-        is_available = False
-
-        # --- فحص سناب شات المطور ---
-        if platform == "SNAP":
-            # إذا لم يوجد نص "og:title" يحتوي على اسم المستخدم، فاليوزر متاح
-            if f'property="og:title" content="{username}"' not in content and status == 404:
-                is_available = True
+        # تأخير بسيط لحماية الحساب الجديد من البند السريع
+        time.sleep(random.uniform(1.5, 3.0))
+        response = requests.get(url, headers=headers, timeout=10)
         
-        # --- فحص إنستقرام المطور ---
-        elif platform == "INSTA":
-            # إنستقرام يغير العنوان إلى "Instagram" فقط في صفحة الـ 404
-            if "<title>Instagram</title>" in content or status == 404:
-                is_available = True
-        
-        # --- فحص سوني (عبر PSNProfiles) ---
-        elif platform == "SONY":
-            # هذا الموقع يعطي 404 حقيقي إذا كان اليوزر غير موجود في قاعدة بيانات سوني
-            if status == 404:
-                is_available = True
-        
-        # --- فحص تيك توك ---
-        elif platform == "TIKTOK":
-            if "notfound" in response.url or status == 404:
-                is_available = True
-
-        # --- فحص X ---
-        elif platform == "X":
-            if status == 404:
-                is_available = True
-
-        if is_available:
-            return f"✅ `{username}`"
+        # إذا كانت الاستجابة 404 أو محتوى فارغ يعني متاح
+        if response.status_code == 404:
+            return f"✅ INSTA (Linked): `{username}`"
         return None
     except:
         return None
 
-# --- نظام التوليد والقوائم ---
-def generate_username(length):
-    return ''.join(random.choices(CHARS, k=int(length)))
+def generate_pattern(p_type):
+    """توليد الأنماط الفخمة (ثلاثي، شبه رباعي...)"""
+    c = random.choices(CHARS, k=3)
+    if p_type == "3":
+        return "".join(random.choices(CHARS, k=3))
+    elif p_type == "3s": # aab / aba
+        return random.choice([f"{c[0]}{c[0]}{c[1]}", f"{c[0]}{c[1]}{c[0]}"])
+    elif p_type == "4":
+        return "".join(random.choices(CHARS, k=4))
+    elif p_type == "4s": # aaab / aabb
+        return random.choice([f"{c[0]}{c[0]}{c[0]}{c[1]}", f"{c[1]}{c[1]}{c[0]}{c[0]}"])
+    return "".join(random.choices(CHARS, k=5))
 
+# --- لوحة التحكم ---
 def main_markup():
     markup = types.InlineKeyboardMarkup(row_width=2)
-    btns = [
-        types.InlineKeyboardButton("Snapchat", callback_data="p_SNAP"),
-        types.InlineKeyboardButton("Instagram", callback_data="p_INSTA"),
-        types.InlineKeyboardButton("PlayStation 🎮", callback_data="p_SONY"),
-        types.InlineKeyboardButton("TikTok", callback_data="p_TIKTOK"),
-        types.InlineKeyboardButton("X (Twitter)", callback_data="p_X")
-    ]
-    markup.add(*btns)
+    options = [("ثلاثي", "3"), ("شبه ثلاثي", "3s"), ("رباعي", "4"), ("شبه رباعي", "4s")]
+    for text, val in options:
+        markup.add(types.InlineKeyboardButton(text, callback_data=f"g_LINK_{val}"))
     return markup
 
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
-    bot.send_message(message.chat.id, "🛰 **بوت الصيد المطور | الإصدار الأخير**\n\nتم تحديث روابط الفحص لتكون أكثر دقة ✅.", reply_markup=main_markup(), parse_mode="Markdown")
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('p_'))
-def select_filter(call):
-    platform = call.data.split('_')[1]
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    for l in ["3", "4", "5"]:
-        markup.add(types.InlineKeyboardButton(f"تخمين عشوائي ({l}) أحرف", callback_data=f"g_{platform}_{l}"))
-    markup.add(types.InlineKeyboardButton("⬅️ عودة", callback_data="back"))
-    bot.edit_message_text(f"🎯 منصة: **{platform}**", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+    bot.send_message(message.chat.id, "🛰 **قناص إنستقرام المربوط | نسخة طلال**\n\nيتم التخمين الآن عبر جلسة حسابك النشطة. يرجى مراقبة الحساب من البند.", reply_markup=main_markup(), parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('g_'))
 def execute_hunt(call):
-    _, platform, length = call.data.split('_')
-    bot.answer_callback_query(call.id, "🔎 جاري الفحص الدقيق...")
+    _, _, p_type = call.data.split('_')
+    bot.answer_callback_query(call.id, "🔎 جاري التخمين من داخل الحساب...")
     
     def worker(_):
-        user = generate_username(length)
-        return check_availability(platform, user)
+        user = generate_pattern(p_type)
+        return check_insta_linked(user)
 
-    # تقليل عدد المحاولات المتزامنة لضمان استقرار الاستجابة من المنصات
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        all_results = [res for res in executor.map(worker, range(10)) if res]
+    # السرعة منخفضة جداً (2 فقط) لأن الحسابات الجديدة حساسة جداً
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = [res for res in executor.map(worker, range(5)) if res]
     
-    if all_results:
-        msg = f"🛰 **يوزرات متاحة لـ {platform}:**\n\n" + "\n".join(all_results)
+    if results:
+        msg = f"🛰 **صيد مؤكد من الحساب ✅:**\n\n" + "\n".join(results)
     else:
-        msg = f"🛰 **نتائج {platform}:**\n\nلم يتم العثory على متاح مؤكد. جرب مجدداً 🔄"
+        msg = "🛰 **نتائج الفحص:**\n\nلم يتم العثور على متاح حالياً. تم الفحص ببطء لحماية حسابك 🛡"
     
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("🔄 صيد جديد", callback_data=call.data))
-    markup.add(types.InlineKeyboardButton("🏠 القائمة", callback_data="back"))
     bot.edit_message_text(msg, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
-
-@bot.callback_query_handler(func=lambda call: call.data == "back")
-def back(call):
-    bot.edit_message_text("🎯 اختر المنصة:", call.message.chat.id, call.message.message_id, reply_markup=main_markup())
 
 if __name__ == "__main__":
     bot.infinity_polling()
