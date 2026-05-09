@@ -12,7 +12,7 @@ bot = telebot.TeleBot(API_TOKEN)
 
 CHARS = string.ascii_lowercase + string.digits
 
-# --- دالة الفحص الذكي (الأكثر دقة) ---
+# --- دالة الفحص الذكي ---
 def check_availability(platform, username):
     urls = {
         "INSTA": f"https://www.instagram.com/{username}/",
@@ -24,46 +24,35 @@ def check_availability(platform, username):
     }
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
-        "Accept-Language": "en-US,en;q=0.9"
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
     }
     
     try:
-        response = requests.get(urls[platform], headers=headers, timeout=5.0, allow_redirects=True)
+        response = requests.get(urls[platform], headers=headers, timeout=4.0, allow_redirects=True)
         content = response.text.lower()
         status = response.status_code
 
-        # منطق الفحص المخصص لكل منصة لضمان الدقة
+        # شروط المتاح لكل منصة
+        is_available = False
         if platform == "SONY":
-            # سوني إذا كان متاح يحولك لصفحة تسجيل الدخول أو يعطي خطأ معين
-            if status == 404 or "login" in response.url.lower() or "not found" in content:
-                return "✅ متاح"
-        
-        elif platform == "INSTA":
-            if status == 404 or "isn't available" in content:
-                return "✅ متاح"
-        
-        elif platform == "TIKTOK":
-            if status == 404 or "couldn't find this account" in content:
-                return "✅ متاح"
-        
-        elif platform == "X":
-            if status == 404 or "this account doesn’t exist" in content:
-                return "✅ متاح"
-        
-        elif platform == "SNAP":
-            if status == 404 or "not found" in content:
-                return "✅ متاح"
+            if status == 404 or "login" in response.url.lower(): is_available = True
+        elif platform == "INSTA" and (status == 404 or "isn't available" in content): is_available = True
+        elif platform == "TIKTOK" and (status == 404 or "couldn't find" in content): is_available = True
+        elif platform == "X" and (status == 404 or "doesn’t exist" in content): is_available = True
+        elif platform == "SNAP" and (status == 404 or "not found" in content): is_available = True
+        elif platform == "DISCORD" and status == 404: is_available = True
 
-        return "❌ ممتلئ"
+        if is_available:
+            return f"✅ `{username}`"
+        return None # العودة بـ None إذا كان مأخوذاً
     except:
-        return "⚠️ فحص يدوي"
+        return None
 
 # --- دالة التوليد العشوائي ---
 def generate_username(length):
     return ''.join(random.choices(CHARS, k=int(length)))
 
-# --- القائمة الرئيسية (PlayStation ثابتة هنا) ---
+# --- القائمة الرئيسية ---
 def main_markup():
     markup = types.InlineKeyboardMarkup(row_width=2)
     btns = [
@@ -79,35 +68,37 @@ def main_markup():
 
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
-    bot.send_message(message.chat.id, "🛰 **بوت الصيد الدقيق | نسخة طلال**\n\nتم تحسين خوارزمية الفحص لتفادي النتائج الخاطئة.", reply_markup=main_markup(), parse_mode="Markdown")
+    bot.send_message(message.chat.id, "🛰 **بوت الصيد الذكي (المتاح فقط)**\n\nسيتم عرض اليوزرات المتاحة ✅ فقط لتسريع عملية القنص.", reply_markup=main_markup(), parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('p_'))
 def select_filter(call):
     platform = call.data.split('_')[1]
     markup = types.InlineKeyboardMarkup(row_width=1)
-    
-    # خيارات التوليد العشوائي
     for l in ["3", "4", "5"]:
         markup.add(types.InlineKeyboardButton(f"تخمين عشوائي ({l}) أحرف", callback_data=f"g_{platform}_{l}"))
-    
     markup.add(types.InlineKeyboardButton("⬅️ عودة", callback_data="back"))
-    bot.edit_message_text(f"🎯 منصة: **{platform}**\nاختر الطول لبدء الفحص الذكي:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+    bot.edit_message_text(f"🎯 منصة: **{platform}**\nاختر الطول:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('g_'))
 def execute_hunt(call):
     _, platform, length = call.data.split('_')
-    bot.answer_callback_query(call.id, "🔎 جاري الفحص الدقيق...")
+    bot.answer_callback_query(call.id, "🔎 جاري البحث عن متاح...")
     
     def worker(_):
         user = generate_username(length)
-        status = check_availability(platform, user)
-        return f"`{user}` -> {status}"
+        return check_availability(platform, user)
 
-    # تشغيل 8 مهام في وقت واحد لضمان الاستقرار والدقة
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        results = list(executor.map(worker, range(8)))
+    # فحص 15 يوزر في كل ضغطة لزيادة فرص إيجاد متاح
+    with ThreadPoolExecutor(max_workers=15) as executor:
+        all_results = list(executor.map(worker, range(15)))
     
-    msg = f"🛰 **نتائج الفحص لـ {platform}:**\n\n" + "\n".join(results)
+    # تصفية النتائج لإبقاء المتاح فقط (حذف الـ None)
+    available_only = [res for res in all_results if res is not None]
+    
+    if available_only:
+        msg = f"🛰 **يوزرات متاحة لـ {platform}:**\n\n" + "\n".join(available_only)
+    else:
+        msg = f"🛰 **نتائج {platform}:**\n\nللأسف، لم يتم العثور على متاح في هذه الدفعة (15 محاولة). جرب مرة أخرى 🔄"
     
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("🔄 صيد جديد", callback_data=call.data))
