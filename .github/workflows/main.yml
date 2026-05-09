@@ -1,61 +1,31 @@
-# إعدادات بوت صيد اليوزرات
-bot_settings:
-  name: "User Hunter Bot"
-  token: "YOUR_TELEGRAM_BOT_TOKEN"
-  admin_id: 123456789
-  language: "ar"
+name: Run Telegram Bot
 
-# إعدادات المنصات المستهدفة
-platforms:
-  - id: "instagram"
-    name: "Instagram"
-    check_url: "https://www.instagram.com/{username}"
-  
-  - id: "tiktok"
-    name: "TikTok"
-    check_url: "https://www.tiktok.com/@{username}"
-  
-  - id: "twitter"
-    name: "X (Twitter)"
-    check_url: "https://twitter.com/{username}"
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
 
-  - id: "snapchat"
-    name: "Snapchat"
-    check_url: "https://www.snapchat.com/add/{username}"
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-  - id: "psn"
-    name: "PlayStation"
-    check_url: "https://my.playstation.com/profile/{username}"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-# فلاتر التخمين المتاحة
-filters:
-  types:
-    - name: "ثلاثي"
-      key: "3"
-      length: 3
-    - name: "شبه ثلاثي"
-      key: "3s"
-      pattern: "aab"
-    - name: "رباعي"
-      key: "4"
-      length: 4
-    - name: "شبه رباعي"
-      key: "4s"
-      pattern: "aaab"
-    - name: "خماسي"
-      key: "5"
-      length: 5
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
-# خيارات سحب اليوزرات الخاملة
-inactive_users_policy:
-  check_status: true
-  methods:
-    - "الدعم الفني (علامة تجارية)"
-    - "مراسلة المالك الأصلي"
-    - "مراقبة تاريخ السقوط"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyTelegramBotAPI
 
-# إعدادات الحماية (لتجنب الحظر)
-security:
-  use_proxy: true
-  request_delay: 2 # بالثواني
-  max_attempts_per_min: 30
+      - name: Run Bot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: python bot.py
